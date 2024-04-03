@@ -1,0 +1,22 @@
+[
+    {
+        "program": "dir",
+        "folder": "dir",
+        "file": "dir\\2024 04 03 20 46 52.txt"
+    },
+    {
+        "program": "echo 1",
+        "folder": "echo 1",
+        "file": "echo 1\\2024 04 03 20 46 52.txt"
+    },
+    {
+        "program": "hostname",
+        "folder": "hostname",
+        "file": "hostname\\2024 04 03 20 46 52.txt"
+    },
+    {
+        "program": "echo 100",
+        "folder": "echo 100",
+        "file": "echo 100\\2024 04 03 20 46 52.txt"
+    }
+]
