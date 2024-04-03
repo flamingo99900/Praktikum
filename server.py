@@ -1,8 +1,18 @@
+#!/usr/bin/python3
+
+import socket
+import asyncio
 import os
 import json
-import xml.etree.ElementTree as ET
-import socket
 from datetime import datetime
+import subprocess
+
+def load_program_data():
+    if os.path.exists("program_data.json"):
+        with open("program_data.json", "r") as json_file:
+            return json.load(json_file)
+    else:
+        return []
 
 
 def get_processes_info():
@@ -25,51 +35,138 @@ def save_to_json(process, filename):
         json.dump(process, f, indent=4)
     print(f"Сохранено в JSON файл: {filename}")
 
+class Server:
+    def __init__(self, host, port):
+        self._host = host
+        self._port = port
+        self.server = None
 
-def save_to_xml(process, filename):
-    root = ET.Element('processes')
-    for process1 in process:
-        proc_elem = ET.SubElement(root, 'process')
-        for key, value in process1.items():
-            ET.SubElement(proc_elem, key).text = value
-    tree = ET.ElementTree(root)
-    tree.write(filename)
-    print(f"Сохранено в XML файл: {filename}")
+    def start(self, is_async=True):
+        if is_async:
+            asyncio.run(self._async_start())
+        else:
+            self._thread_start()
 
+    async def handle_client(self, reader, writer):
+        res = None
+        input_data = await reader.read(1)
+        input_data = input_data.decode('utf-8')
+        if input_data == "1":
+            print("poma")
+            res = await self.roma(reader)
+        elif input_data == "2":
+            print("polina")
+            res = await self.polina(reader)
+        if res:
+            writer.write(res.encode('utf-8'))
+            writer.close()
+            await writer.wait_closed()
 
-def handle_client_connection(conn, addr):
-    with conn:
-        print('Подключен клиент:', addr)
+    async def roma(self, reader):
+        programs = {"dir", "echo 1"}
+        program_data = load_program_data()  # добавляю программы, вызванные во время предыдущих запусков кода
+        if program_data:
+            for i in program_data:
+                programs.add(i["program"])
+        data = ""
         while True:
-            data = conn.recv(1024)
-            if not data:
-                break
-            command = data.decode()
-            if command == 'update':
-                process = get_processes_info()
-                format_choice = input("Выберите формат сохранения (json/xml): ").lower()
-                now = datetime.now()
-                folder_name = now.strftime("%d-%m-%Y")
-                filename = now.strftime("%H-%M-%S")
-                if not os.path.exists(folder_name):
-                    os.makedirs(folder_name)
-                if format_choice == 'json':
+            request = await reader.read(1)
+            if request:
+                if request.decode() != "q":
+                    data += request.decode()
+                if request.decode() == "q":
+                    break
+        if data:  # добавляю программы клиента к списку всех программ
+            new_programs = set()
+            print("DATA FROM CLIENT:\n", data, "\n")
+            for program in data.split(","):
+                new_programs.add(program)
+            programs.update(new_programs)
+        print(programs)
+        for program in programs:
+            print(program)
+            # Создаем папку с именем программы, если она еще не существует
+            if not os.path.exists(program):
+                os.makedirs(program)
+
+            # Получаем текущую дату и время
+            current_datetime = datetime.now()
+            formatted_datetime = current_datetime.strftime("%Y %m %d %H %M %S")
+
+            # Создаем имя файла в формате "ГГГГ ММ ДД ЧЧ ММ СС"
+            output_file_name = f"{formatted_datetime}.txt"
+
+            # Создаем файл для вывода
+            output_file = os.path.join(program, output_file_name)
+
+            # Запускаем программу и записываем её вывод в файл
+            with open(output_file, "w") as f:
+                process = subprocess.run(program, shell=True, capture_output=True, text=True)
+                output = process.stdout.encode('cp1251').decode('cp866')
+                print(output)
+                f.write(output)
+
+            # Добавляем информацию о программе, папке и файле в список
+            program_data.append({
+                "program": program,
+                "folder": program,
+                "file": output_file
+            })
+
+        # Сохраняем информацию в файл JSON
+        with open("program_data.json", "w") as json_file:
+            json.dump(program_data, json_file, indent=4)
+
+        return "Успешно"
+
+    async def polina(self, reader):
+        data = ""
+        while True:
+            request = await reader.read(1)
+            if request:
+                data += request.decode()
+                if data == "update":
+                    process = get_processes_info()
+                    now = datetime.now()
+                    folder_name = now.strftime("%d-%m-%Y")
+                    filename = now.strftime("%H-%M-%S")
+                    if not os.path.exists(folder_name):
+                        os.makedirs(folder_name)
                     save_to_json(process, f"{folder_name}/{filename}.json")
-                elif format_choice == 'xml':
-                    save_to_xml(process, f"{folder_name}/{filename}.xml")
-                else:
-                    print("Неправильный формат выбран.")
-                conn.send(f'Сохранено в файл: {filename}.{format_choice}'.encode())
-                break
+                    s = f'Сохранено в файл: {filename}.json'
+                    return s
+
+    async def _async_start(self):
+        self.server = await asyncio.start_server(
+            self.handle_client, self._host, self._port)
+        addr = self.server.sockets[0].getsockname()
+        print(f'Сервер запущен на {addr}')
+        async with self.server:
+            await self.server.serve_forever()
+
+    def _thread_start(self):
+        #server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #server_socket.bind((self._host, self._port))
+        #server_socket.listen(1)
+        #print(f"Сервер запущен и слушает на {self._host}:{self._port}")
+        #try:
+            #while True:
+                #client_sock, address = server_socket.accept()
+                #print(f"Принято соединение от {address}")
+                #client_handler = threading.Thread(
+                    #target=handle_client,
+                    #args=(client_sock,)  # Передаем сокет клиента в поток
+                #)
+                #client_handler.start()
+        #finally:
+            #server_socket.close()
+        pass
+
 
 if __name__ == "__main__":
-    HOST = '127.0.0.1'
+    HOST = socket.gethostname()
     PORT = 4444
+    server = Server(HOST, PORT)
+    server.start()
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((HOST, PORT))
-        s.listen()
-        print('Сервер запущен и ожидает подключения...')
-        conn, addr = s.accept()
-        with conn:
-            handle_client_connection(conn, addr)
+
